@@ -97,6 +97,16 @@ SESS_POST_REQUEST = endpoints.ResourceContainer(
     websafeConferenceKey=messages.StringField(1),
 )
 
+SESS_STRING_WSCK = endpoints.ResourceContainer(
+    sessType=messages.StringField(1),
+    websafeConferenceKey=messages.StringField(2),
+)
+
+SESS_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeSessionKey=messages.StringField(1),
+)
+
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
@@ -630,8 +640,9 @@ class ConferenceApi(remote.Service):
 
         # create or update speaker with session
         sess_wk = sess_key.urlsafe()
-        speak_key = ndb.Key(Speaker, data['speakerName'])
-        speak = speak_key.get()
+        q = Speaker.query()
+        q = q.filter(Speaker.name==data['speakerName'])
+        speak = q.get()
         if not speak:
             # create the speaker
             speak = Speaker(name=data['speakerName'],
@@ -656,6 +667,72 @@ class ConferenceApi(remote.Service):
     def createSession(self, request):
         """Create new session."""
         return self._createSessionObject(request)
+
+    @endpoints.method(CONF_GET_REQUEST, SessionForms,
+        path='getConferenceSessions/{websafeConferenceKey}',
+        http_method='GET', name='getConferenceSessions')
+    def getConferenceSessions(self, request):
+        "Return sessions for a specific conference"
+        # authorization isn't necessary
+        # create ancestor query for all key matches for given conference
+        conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        sessions = Session.query(ancestor=conf_key)
+        return SessionForms(
+            items=[self._copySessionToForm(sess) for sess in sessions]
+        )
+
+    @endpoints.method(SESS_STRING_WSCK, SessionForms,
+        path='getConferenceSessionsByType/{websafeConferenceKey}',
+        http_method='GET', name='getConferenceSessionsByType')
+    def getConferenceSessionsByType(self, request):
+        "Return sessions of a certain type for a specific conference"
+        # authorization isn't necessary
+        # create ancestor query for all key matches for given conference
+        conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        sessions = Session.query(ancestor=conf_key)
+        # filter for type of session
+        sessions = sessions.filter(Session.typeOfSession==request.sessType)
+        return SessionForms(
+            items=[self._copySessionToForm(sess) for sess in sessions]
+        )
+
+    @endpoints.method(endpoints.ResourceContainer(
+        speakerName=messages.StringField(1)), SessionForms,
+        http_method='POST', name='getSessionsBySpeaker')
+    def getSessionsBySpeaker(self, request):
+        "Return sessions across all conferences given a speaker name"
+        # authorization isn't necessary
+        q = Speaker.query()
+        q = q.filter(Speaker.name==request.speakerName)
+        q = q.get()
+        wsk_list = q.sessionKeysToSpeak
+        sessions = [ndb.Key(urlsafe=wsk).get() for wsk in wsk_list]
+
+        return SessionForms(
+            items=[self._copySessionToForm(s) for s in sessions]
+        )
+
+# - - - - - - Session Wishlist - - - - - - - - - - - - - - -
+    @ndb.transactional()
+    def _updateSessionWishlist(self, request, add=True):
+        return 0
+
+    @endpoints.method(SESS_GET_REQUEST, BooleanMessage,
+        path='session/{websafeSessionKey}',
+        http_method='POST', name='addSessionToWishlist')
+    def addSessionToWishlist(self, request):
+        """Add session to user wishlist"""
+        return self._updateSessionWishlist(request)
+
+    def getSessionsInWishlist():
+        return 0
+
+    @endpoints.method(SESS_GET_REQUEST, BooleanMessage,
+        path='session/{websafeSessionKey}',
+        http_method='DELETE', name='deleteSessionInWishlist')
+    def deleteSessionInWishlist(self, request):
+        """Remove session from user wishlist"""
+        return self._updateSessionWishlist(request, add=False)
 
 
 api = endpoints.api_server([ConferenceApi]) # register API
