@@ -708,21 +708,24 @@ class ConferenceApi(remote.Service):
     def getSessionsBySpeaker(self, request):
         "Return sessions across all conferences given a speaker name"
         # authorization isn't necessary
-        q = Speaker.query()
-        q = q.filter(Speaker.name==request.speakerName)
-        q = q.get()
-        q = q.sessionKeysToSpeak
-        sess_keys = [ndb.Key(urlsafe=wsk) for wsk in q]
+        speak_key = ndb.Key(Speaker, getattr(request, 'speakerName'))
+        speak = speak_key.get()
+        sess_keys = [ndb.Key(urlsafe=wsk) for wsk in speak.sessionKeysToSpeak]
         sessions = ndb.get_multi(sess_keys)
 
         # pair sessions with conference names
-        sess_conf_pairs = []
-        for s in sessions:
-            conf = ndb.Key(urlsafe=getattr(s, 'conferenceKey')).get()
-            sess_conf_pairs.append((s, getattr(conf, 'name')))
+        # use get_multi() where possible; NOT get() in a loop
+        sess_cwk = [(s, getattr(s, 'conferenceKey')) for s in sessions]
+        conf_keys = [ndb.Key(urlsafe=cwk) for s, cwk in sess_cwk]
+        conferences = ndb.get_multi(set(conf_keys)) # don't need duplicates
+        sess_cname = []
+        for s, cwk in sess_cwk:
+            for c in conferences:
+                if cwk == c.key.urlsafe():
+                    sess_cname.append((s, getattr(c, 'name')))
 
         return SessionForms(
-            items=[self._copySessionToForm(*scp) for scp in sess_conf_pairs]
+            items=[self._copySessionToForm(*scn) for scn in sess_cname]
         )
 
 # - - - - - - Session Wishlist - - - - - - - - - - - - - - -
