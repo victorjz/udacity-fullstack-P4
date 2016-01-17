@@ -42,7 +42,7 @@ class ProfileForm(messages.Message):
     teeShirtSize = messages.EnumField('TeeShirtSize', 3)
     conferenceKeysToAttend = messages.StringField(4, repeated=True)
     # additional for course project
-    sessionKeysInWishlist = ndb.StringField(5, repeated=True)
+    sessionKeysInWishlist = messages.StringField(5, repeated=True)
 
 
 class StringMessage(messages.Message):
