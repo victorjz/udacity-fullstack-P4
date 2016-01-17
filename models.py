@@ -141,6 +141,7 @@ class SessionForm(messages.Message):
     startTime       = messages.StringField(7)
     duration        = messages.IntegerField(8, variant=messages.Variant.INT32)
     websafeKey      = messages.StringField(9)
+    conferenceName  = messages.StringField(10)
 
 class SessionForms(messages.Message):
     """SessionForms -- multiple Session outbound form message"""

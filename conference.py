@@ -574,7 +574,7 @@ class ConferenceApi(remote.Service):
         )
 
 # - - - Sessions - - - - - - - - - - - - - - - - - - - -
-    def _copySessionToForm(self, sess):
+    def _copySessionToForm(self, sess, confName):
         """Copy relevant fields from Session to SessionForm. """
         sf = SessionForm()
         for field in sf.all_fields():
@@ -586,6 +586,8 @@ class ConferenceApi(remote.Service):
                     setattr(sf, field.name, getattr(sess, field.name))
             if field.name == 'websafeKey':
                 setattr(sf, field.name, sess.key.urlsafe())
+        if confName:
+            setattr(sf, 'conferenceName', confName)
         sf.check_initialized()
         return sf
 
@@ -659,7 +661,7 @@ class ConferenceApi(remote.Service):
         sess.put()
         # TODO memcache entry as described above
 
-        return self._copySessionToForm(sess) # formerly request
+        return self._copySessionToForm(sess, getattr(conf, 'name')) # formerly request
 
     @endpoints.method(SESS_POST_REQUEST, SessionForm,
             path='session/{websafeConferenceKey}',
@@ -676,9 +678,10 @@ class ConferenceApi(remote.Service):
         # authorization isn't necessary
         # create ancestor query for all key matches for given conference
         conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        confName = getattr(conf_key.get(), 'name')
         sessions = Session.query(ancestor=conf_key)
         return SessionForms(
-            items=[self._copySessionToForm(sess) for sess in sessions]
+            items=[self._copySessionToForm(sess, confName) for sess in sessions]
         )
 
     @endpoints.method(SESS_STRING_WSCK, SessionForms,
@@ -689,11 +692,12 @@ class ConferenceApi(remote.Service):
         # authorization isn't necessary
         # create ancestor query for all key matches for given conference
         conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        confName = getattr(conf_key.get(), 'name')
         sessions = Session.query(ancestor=conf_key)
         # filter for type of session
         sessions = sessions.filter(Session.typeOfSession==request.sessType)
         return SessionForms(
-            items=[self._copySessionToForm(sess) for sess in sessions]
+            items=[self._copySessionToForm(sess, confName) for sess in sessions]
         )
 
     @endpoints.method(endpoints.ResourceContainer(
@@ -709,8 +713,14 @@ class ConferenceApi(remote.Service):
         sess_keys = [ndb.Key(urlsafe=wsk) for wsk in q]
         sessions = ndb.get_multi(sess_keys)
 
+        # pair sessions with conference names
+        sess_conf_pairs = []
+        for s in sessions:
+            conf = ndb.Key(urlsafe=getattr(s, 'conferenceKey')).get()
+            sess_conf_pairs.append((s, getattr(conf, 'name')))
+
         return SessionForms(
-            items=[self._copySessionToForm(s) for s in sessions]
+            items=[self._copySessionToForm(*scp) for scp in sess_conf_pairs]
         )
 
 # - - - - - - Session Wishlist - - - - - - - - - - - - - - -
