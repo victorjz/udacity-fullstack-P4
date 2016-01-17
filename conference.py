@@ -613,6 +613,7 @@ class ConferenceApi(remote.Service):
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
         del data['websafeConferenceKey'] # elements of form but not session
         del data['websafeKey']
+        del data['conferenceName']
 
         # TODO session defaults
         # add default values for those missing (both data model & outbound Message)
@@ -635,20 +636,21 @@ class ConferenceApi(remote.Service):
         sess_id = Session.allocate_ids(size=1, parent=c_key)[0]
         sess_key = ndb.Key(Session, sess_id, parent=c_key)
         data['key'] = sess_key
-        # DEBUG check for errors
+        # set conferenceKey. not assumed it comes in with the request
         data['conferenceKey'] = request.conferenceKey = request.websafeConferenceKey
-        # perform the step of adding speaker id to Session dict
-        # after dealing with speaker
 
         # create or update speaker with session
         sess_wk = sess_key.urlsafe()
-        q = Speaker.query()
-        q = q.filter(Speaker.name==data['speakerName'])
-        speak = q.get()
+        speak_key = ndb.Key(Speaker, data['speakerName'])
+        speak = speak_key.get()
         if not speak:
             # create the speaker
-            speak = Speaker(name=data['speakerName'],
-                            sessionKeysToSpeak=[sess_wk])
+            speak_data = {}
+            speak_data['key'] = speak_key
+            speak_data['name'] = data['speakerName']
+            speak_data['sessionKeysToSpeak'] = [sess_wk]
+            speak = Speaker(**speak_data)
+
         else:
             # add the session to the speaker
             speak.sessionKeysToSpeak.append(sess_wk)
