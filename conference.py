@@ -656,8 +656,6 @@ class ConferenceApi(remote.Service):
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
         # convert time from strings to Time objects
         if data['startTime']:
-            #targs = dict(zip(['hour', 'minute'], [int(i) for i in data['startTime'].split(":")]))
-            #data['startTime'] = time(**targs)
             data['startTime'] = self._stringToTime(data['startTime'])
 
         # generate Conference Key based on conference ID, and Session
@@ -758,6 +756,11 @@ class ConferenceApi(remote.Service):
     @ndb.transactional() # xg false; only referencing Profile
     def _updateSessionWishlist(self, request, add=True):
         """Add or remove session from user wishlist"""
+        # make sure user is authed
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+
         retval = None # value to return indicating success
         prof = self._getProfileFromUser() # get user Profile
 
@@ -809,6 +812,11 @@ class ConferenceApi(remote.Service):
         http_method='GET', name='getSessionsInWishlist')
     def getSessionsInWishlist(self, request):
         """Get list of sessions in user's wishlist."""
+        # make sure user is authed
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+
         prof = self._getProfileFromUser() # get user Profile
         sess_keys = [ndb.Key(urlsafe=wssk) for wssk in prof.sessionKeysInWishlist]
         sessions = ndb.get_multi(sess_keys)
