@@ -576,16 +576,6 @@ class ConferenceApi(remote.Service):
         )
 
 # - - - Sessions - - - - - - - - - - - - - - - - - - - -
-    @endpoints.method(endpoints.ResourceContainer(
-        spkr_wkey=messages.StringField(1),
-        conf_wkey=messages.StringField(2)),
-        StringMessage,
-        http_method='GET', name='testTask')
-    def _testTask(self, request):
-        """developer method to test featured speaker"""
-        return StringMessage(data=self._cacheFeaturedSpeaker(
-            request.spkr_wkey, request.conf_wkey))
-
     @staticmethod
     def _cacheFeaturedSpeaker(spkr_wkey, conf_wkey):
         """Create announcement for featured speaker and assign to memcache
@@ -661,20 +651,14 @@ class ConferenceApi(remote.Service):
         del data['websafeKey']
         del data['conferenceName']
 
-        # TODO session defaults
-        # add default values for those missing (both data model & outbound Message)
-        #for df in DEFAULTS:
-        #    if data[df] in (None, []):
-        #        data[df] = DEFAULTS[df]
-        #        setattr(request, df, DEFAULTS[df])
-
         # convert date from strings to Date objects
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], "%Y-%m-%d").date()
         # convert time from strings to Time objects
         if data['startTime']:
-            targs = dict(zip(['hour', 'minute'], [int(i) for i in data['startTime'].split(":")]))
-            data['startTime'] = time(**targs)
+            #targs = dict(zip(['hour', 'minute'], [int(i) for i in data['startTime'].split(":")]))
+            #data['startTime'] = time(**targs)
+            data['startTime'] = self._stringToTime(data['startTime'])
 
         # generate Conference Key based on conference ID, and Session
         # ID based on Conference key. get Session key from ID
@@ -764,17 +748,8 @@ class ConferenceApi(remote.Service):
         sess_keys = [ndb.Key(urlsafe=wsk) for wsk in speak.sessionKeysToSpeak]
         sessions = ndb.get_multi(sess_keys)
 
-        # pair sessions with conference names
-        # use get_multi() where possible; NOT get() in a loop
-        sess_cwk = [(s, getattr(s, 'conferenceKey')) for s in sessions]
-        conf_keys = [ndb.Key(urlsafe=cwk) for s, cwk in sess_cwk]
-        conferences = ndb.get_multi(set(conf_keys)) # don't need duplicates
-        sess_cname = []
-        for s, cwk in sess_cwk:
-            for c in conferences:
-                if cwk == c.key.urlsafe():
-                    sess_cname.append((s, getattr(c, 'name')))
-
+        # pair session with their parent conference name
+        sess_cname = self._getConfNamesForSessions(sessions)
         return SessionForms(
             items=[self._copySessionToForm(*scn) for scn in sess_cname]
         )
@@ -838,7 +813,102 @@ class ConferenceApi(remote.Service):
         sess_keys = [ndb.Key(urlsafe=wssk) for wssk in prof.sessionKeysInWishlist]
         sessions = ndb.get_multi(sess_keys)
 
+        # pair sessions with their parent conference names
+        sess_cname = self._getConfNamesForSessions(sessions)
+
         return SessionForms(
-            items=[self._copySessionToForm(sess) for sess in sessions])
+            items=[self._copySessionToForm(*scn) for scn in sess_cname])
+
+# - - - - - - - - - New Queries - - - - - - - - - - - - - - -
+    @endpoints.method(endpoints.ResourceContainer(
+        websafeConferenceKey=messages.StringField(1),
+        earliest_time=messages.StringField(2),
+        latest_time=messages.StringField(3)),
+        SessionForms,
+        path='getConferenceSessionsInTime/{websafeConferenceKey}',
+        http_method='POST', name='getConferenceSessionsInTime')
+    def getConferenceSessionsInTime(self, request):
+        """Given a conference and time range, show sessions
+        that start within the time range."""
+        tearliest = self._stringToTime(request.earliest_time)
+        tlatest = self._stringToTime(request.latest_time)
+        conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        sessions = Session.query(ancestor=conf_key)
+        sessions = sessions.filter(Session.startTime >= tearliest)
+        sessions = sessions.filter(Session.startTime <= tlatest)
+
+        cname = conf_key.get().name
+        return SessionForms(
+            items=[self._copySessionToForm(s, cname) for s in sessions]
+        )
+
+    @endpoints.method(CONF_GET_REQUEST, StringMessage,
+        path='getConferenceSessionTypes/{websafeConferenceKey}',
+        http_method='GET', name='getConferenceSessionTypes')
+    def getConferenceSessionTypes(self, request):
+        """Given a conference, returns a string listing all unique session
+        types offered within the conference"""
+        # websafeConferenceKey
+        conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        sessions = Session.query(ancestor=conf_key)
+        types_set = set()
+        for s in sessions:
+            types_set.add(s.typeOfSession)
+        types = ', '.join(types_set)
+
+        return StringMessage(data=types)
+
+# - - - - - - Support Functions - - - - - - - - - - - - -
+    @staticmethod
+    def _stringToTime(timestring):
+        """Given a string representing 24h time of day, return
+        a time object"""
+        stringelements = [int(i) for i in timestring.split(":")]
+        targs = dict(zip(['hour','minute'], stringelements))
+        return time(**targs)
+
+    @staticmethod
+    def _getConfNamesForSessions(sessions):
+        """Given a list of session, return session and parent
+        conference name pairs
+
+        Used when creating SessionForms with multiple sessions"""
+        # use get_multi() where possible; NOT get() in a loop
+        conf_keys = [s.key.parent() for s in sessions]
+        conferences = ndb.get_multi(set(conf_keys))
+        sess_cname = []
+        for s in sessions:
+            for c in conferences:
+                if s.conferenceKey == c.key.urlsafe():
+                    sess_cname.append((s, c.name))
+        return sess_cname
+
+
+    @endpoints.method(endpoints.ResourceContainer(
+        spkr_wkey=messages.StringField(1),
+        conf_wkey=messages.StringField(2)),
+        StringMessage,
+        http_method='GET', name='testTask')
+    def _testTask(self, request):
+        """developer endpoint method to test featured speaker
+
+        Debug purposes"""
+        return StringMessage(data=self._cacheFeaturedSpeaker(
+            request.spkr_wkey, request.conf_wkey))
+
+    @endpoints.method(endpoints.ResourceContainer(
+        sess_wkey=messages.StringField(1)),
+        StringMessage,
+        http_method='GET', name='testHelp')
+    def _testHelp(self, request):
+        """developer endpoint method to help massage data
+
+        Debug purposes"""
+        prof = self._getProfileFromUser()
+        prof.sessionKeysInWishlist.remove(request.sess_wkey)
+        prof.put()
+        return StringMessage(data='done')
+
+
 
 api = endpoints.api_server([ConferenceApi]) # register API
