@@ -92,6 +92,8 @@ from models import SessionForm
 from models import SessionForms
 from models import Speaker
 
+MEMCACHE_FEATURED_SPEAKER = "FEATURED_SPEAKER"
+
 SESS_POST_REQUEST = endpoints.ResourceContainer(
     SessionForm,
     websafeConferenceKey=messages.StringField(1),
@@ -574,6 +576,51 @@ class ConferenceApi(remote.Service):
         )
 
 # - - - Sessions - - - - - - - - - - - - - - - - - - - -
+    @endpoints.method(endpoints.ResourceContainer(
+        spkr_wkey=messages.StringField(1),
+        conf_wkey=messages.StringField(2)),
+        StringMessage,
+        http_method='GET', name='testTask')
+    def _testTask(self, request):
+        """developer method to test featured speaker"""
+        return StringMessage(data=self._cacheFeaturedSpeaker(
+            request.spkr_wkey, request.conf_wkey))
+
+    @staticmethod
+    def _cacheFeaturedSpeaker(spkr_wkey, conf_wkey):
+        """Create announcement for featured speaker and assign to memcache
+        Used by taskqueue
+        request contains:
+            spkr_wkey: websafe key representing speaker for session just added
+            conf_wkey: websafe key represending conference for session just added
+        """
+        spkr = ndb.Key(urlsafe=spkr_wkey).get()
+        conf = ndb.Key(urlsafe=conf_wkey).get() # To later retrieve conference name
+
+        # if there is more than one session at this conference by the same
+        # speaker, add announcement to memcache
+
+        # compare session parents to conference
+        spkr_session_wkeys = getattr(spkr, 'sessionKeysToSpeak')
+        spkr_session_keys = [ndb.Key(urlsafe=swk) for swk in spkr_session_wkeys]
+
+        same_conf_session_keys = []
+        for sk in spkr_session_keys:
+            if sk.parent() == conf.key:
+                same_conf_session_keys.append(sk)
+
+        # if number of matches > 1, announce a featured speaker
+        if len(same_conf_session_keys) > 1:
+            same_conf_sessions = ndb.get_multi(same_conf_session_keys)
+            announcement = "The featured speaker at %s is %s and will speak at these sessions: %s" % (
+                conf.name, spkr.name,
+                ', '.join([s.name for s in same_conf_sessions]))
+            memcache.set(MEMCACHE_FEATURED_SPEAKER, announcement)
+        else:
+            announcement = ""
+
+        return announcement
+
     def _copySessionToForm(self, sess, confName):
         """Copy relevant fields from Session to SessionForm. """
         sf = SessionForm()
@@ -590,7 +637,6 @@ class ConferenceApi(remote.Service):
             setattr(sf, 'conferenceName', confName)
         sf.check_initialized()
         return sf
-
 
     def _createSessionObject(self, request):
         """Create or update Conference object, returning ConferenceForm/request."""
@@ -654,14 +700,19 @@ class ConferenceApi(remote.Service):
         else:
             # add the session to the speaker
             speak.sessionKeysToSpeak.append(sess_wk)
-        # create Speaker
-        speak.put()
+        # this statement appears later; session should be put first
+        # speak.put()
 
         # create Session, create memcache entry if speaker
         # has > 1 session at Conference & return (copied) SessionForm
         sess = Session(**data)
         sess.put()
+        speak.put() # only commit speaker if session successful
         # TODO memcache entry as described above
+        speak_wkey = speak_key.urlsafe()
+        conf_wkey = request.websafeConferenceKey
+        taskqueue.add(params={'spkr_wkey':speak_wkey, 'conf_wkey':conf_wkey},
+            url='/tasks/set_featured_speaker')
 
         return self._copySessionToForm(sess, getattr(conf, 'name')) # formerly request
 
