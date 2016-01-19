@@ -16,28 +16,35 @@ https://valid-progress-115922.appspot.com/_ah/api/explorer
 To deploy using source code, uncompress the provided zip file and review the
 course-provided instructions in README.md
 
-TASK 1 WRITTEN RESPONSES
---Explain design choices for session and speaker implementation.
-  The differences between Session and SessionForm follow conventions observed
-in the differences between Conference an ConferenceForm.  For data that refers
-to anything other than a Session, then Session will strictly contain a
-websafekey referencing the other class, while sessionForm might contain the name
-of the other class object in addition to the websafekey.  And so Session
-contains ConferenceKey while SessionForm contains ConferenceKey and
-conferenceName.  This mirrors the fact that Conference contains just
-organizerUserId while ConferenceForm contains that item plus
-organizerDisplayName.
-  The decision made for a session speaker is to make it its own entity rather than
-a property.  If kept as a string property, then the query in Task 1 to search
-for all session entries by speaker can be problematic if sessions were ever to
-reach a number in the thousands or more.  Keeping a speaker as an entity and
-recording the sessions associated with that speaker means there are likely far
-fewer items to examine in a query.  Also, if speaker is ever further defined, for
-example to record professional affiliations, ratings, an ID, etc., then as its
-own entity such properties can be added.  As of now, Speaker keys are based on
-the speaker name only, but it would be easy enough to decide on some different
-way of creating a key and adding more properties than if speaker were just a
-property.
+TASK 1 WRITTEN RESPONSES --Explain design choices for session and speaker
+implementation.  Following the pattern between Conference and ConferenceForm,
+Session and SessionForm were created.  It could be determined from examining
+Conference and ConferenceFrom that the former is extends Model and is necessary
+for storing data in the datastore, while ConferenceForm extends Messages and is
+necessary for passing information back to the frontend of the application.
+Likewise, then, were Session and SessionForm designed.
+ The differences between
+Session and SessionForm follow conventions observed in the differences between
+Conference an ConferenceForm. For data that refers to anything other than a
+Session, then Session will strictly contain a websafekey referencing the other
+class, while sessionForm might contain the name of the other class object in
+addition to the websafekey. And so Session contains ConferenceKey while
+SessionForm contains ConferenceKey and conferenceName.  This mirrors the fact
+that Conference contains just organizerUserId while ConferenceForm contains that
+item plus organizerDisplayName.  The decision made for a session speaker is to
+make it its own entity rather than a property.  If kept as a string property,
+then the query in Task 1 to search for all session entries by speaker can be
+problematic if sessions were ever to reach a number in the thousands or more.
+There is a similar problem in Task 4 when determining if there are more than one
+session by the same speaker in the same conference.  Keeping a speaker as an
+entity and recording the sessions associated with that speaker means there are
+likely far fewer items to examine in a query.  Also, if speaker is ever further
+defined, for example to record professional affiliations, ratings, an ID, etc.,
+then as its own entity such properties can be added later.
+  As of now, Speaker keys are based on the speaker name only, but it would be
+easy enough to decide on some different data element for creating a better key
+later, if it were ever decided that speakers must register and obtain a
+registration ID, for example.
 
 TASK 3 WRITTEN RESPONSES
   The first made up query is getConferenceSessionsInTime.  This is designed so
