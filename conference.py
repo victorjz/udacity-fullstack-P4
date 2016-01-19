@@ -856,7 +856,6 @@ class ConferenceApi(remote.Service):
     def getConferenceSessionTypes(self, request):
         """Given a conference, returns a string listing all unique session
         types offered within the conference"""
-        # websafeConferenceKey
         conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
         sessions = Session.query(ancestor=conf_key)
         types_set = set()
@@ -865,6 +864,33 @@ class ConferenceApi(remote.Service):
         types = ', '.join(types_set)
 
         return StringMessage(data=types)
+
+    # proposed query described in step 3
+    @endpoints.method(endpoints.ResourceContainer(
+        websafeConferenceKey=messages.StringField(1),
+        unwanted_session=messages.StringField(2),
+        latest_time=messages.StringField(3)),
+        SessionForms,
+        path='noUnwantedSessionsAndBeforeTime/{websafeConferenceKey}',
+        http_method='POST', name='noUnwantedSessionsAndBeforeTime')
+    def noUnwantedSessionsAndBeforeTime(self, request):
+        """Given a conference, show sessions that are not of a certain type
+        that start before a certain time."""
+        conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
+        q = Session.query(ancestor=conf_key)
+        q = q.filter(Session.typeOfSession != request.unwanted_session)
+
+        tlatest_time = self._stringToTime(request.latest_time)
+        sessions = []
+        for s in q:
+            if s.startTime < tlatest_time:
+                sessions.append(s)
+
+        cname = conf_key.get().name
+        return SessionForms(
+            items = [self._copySessionToForm(s, cname) for s in sessions]
+        )
+
 
 # - - - - - - Support Functions - - - - - - - - - - - - -
     @staticmethod
