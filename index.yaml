@@ -104,3 +104,9 @@ indexes:
   ancestor: yes
   properties:
   - name: typeOfSession
+
+- kind: Session
+  ancestor: yes
+  properties:
+  - name: typeOfSession
+  - name: name

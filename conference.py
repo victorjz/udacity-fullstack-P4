@@ -591,8 +591,7 @@ class ConferenceApi(remote.Service):
         # speaker, add announcement to memcache
 
         # compare session parents to conference
-        spkr_session_wkeys = getattr(spkr, 'sessionKeysToSpeak')
-        spkr_session_keys = [ndb.Key(urlsafe=swk) for swk in spkr_session_wkeys]
+        spkr_session_keys = getattr(spkr, 'sessionKeysToSpeak')
 
         same_conf_session_keys = []
         for sk in spkr_session_keys:
@@ -606,12 +605,15 @@ class ConferenceApi(remote.Service):
                 conf.name, spkr.name,
                 ', '.join([s.name for s in same_conf_sessions]))
             memcache.set(MEMCACHE_FEATURED_SPEAKER, announcement)
-        else:
-            announcement = ""
 
-        return announcement
+    @endpoints.method(message_types.VoidMessage, StringMessage,
+            path='conference/featured_speaker/get',
+            http_method='GET', name='getFeaturedSpeaker')
+    def getFeaturedSpeaker(self, request):
+        """Return Announcement from memcache."""
+        return StringMessage(data=memcache.get(MEMCACHE_FEATURED_SPEAKER) or "")
 
-    def _copySessionToForm(self, sess, confName):
+    def _copySessionToForm(self, sess, confName, speakName):
         """Copy relevant fields from Session to SessionForm. """
         sf = SessionForm()
         for field in sf.all_fields():
@@ -621,10 +623,12 @@ class ConferenceApi(remote.Service):
                     setattr(sf, field.name, str(getattr(sess, field.name)))
                 else:
                     setattr(sf, field.name, getattr(sess, field.name))
-            if field.name == 'websafeKey':
+            if field.name == 'websafeSessionKey':
                 setattr(sf, field.name, sess.key.urlsafe())
         if confName:
             setattr(sf, 'conferenceName', confName)
+        if speakName:
+            setattr(sf, 'speakerName', speakName)
         sf.check_initialized()
         return sf
 
@@ -648,8 +652,10 @@ class ConferenceApi(remote.Service):
         # copy SessionForm/ProtoRPC Message into dict
         data = {field.name: getattr(request, field.name) for field in request.all_fields()}
         del data['websafeConferenceKey'] # elements of form but not session
-        del data['websafeKey']
+        del data['websafeSessionKey']
         del data['conferenceName']
+        # performing this step once we're done with this data item:
+        # del data['speakerName']
 
         # convert date from strings to Date objects
         if data['date']:
@@ -665,23 +671,29 @@ class ConferenceApi(remote.Service):
         sess_key = ndb.Key(Session, sess_id, parent=c_key)
         data['key'] = sess_key
         # set conferenceKey. not assumed it comes in with the request
-        data['conferenceKey'] = request.conferenceKey = request.websafeConferenceKey
+        # this data field no longer part of SessionForm
+        # data['conferenceKey'] = request.conferenceKey = request.websafeConferenceKey
 
         # create or update speaker with session
         sess_wk = sess_key.urlsafe()
-        speak_key = ndb.Key(Speaker, data['speakerName'])
-        speak = speak_key.get()
+        speak_q = Speaker.query()
+        speak_q = speak_q.filter(Speaker.name==data['speakerName'])
+        speak = speak_q.get()
         if not speak:
             # create the speaker
+            speak_id = Speaker.allocate_ids(size=1)[0]
             speak_data = {}
-            speak_data['key'] = speak_key
+            speak_data['key'] = ndb.Key(Speaker, speak_id)
             speak_data['name'] = data['speakerName']
-            speak_data['sessionKeysToSpeak'] = [sess_wk]
+            speak_data['sessionKeysToSpeak'] = [sess_key] # DEBUG store key not websafe key
             speak = Speaker(**speak_data)
-
         else:
             # add the session to the speaker
-            speak.sessionKeysToSpeak.append(sess_wk)
+            speak.sessionKeysToSpeak.append(sess_key)
+        # done with this data item and is not part of Session
+        del data['speakerName']
+        # speaker key belongs in Session
+        data['speakerKey'] = speak.key
         # this statement appears later; session should be put first
         # speak.put()
 
@@ -691,12 +703,12 @@ class ConferenceApi(remote.Service):
         sess.put()
         speak.put() # only commit speaker if session successful
         # TODO memcache entry as described above
-        speak_wkey = speak_key.urlsafe()
+        speak_wkey = speak.key.urlsafe()
         conf_wkey = request.websafeConferenceKey
         taskqueue.add(params={'spkr_wkey':speak_wkey, 'conf_wkey':conf_wkey},
             url='/tasks/set_featured_speaker')
 
-        return self._copySessionToForm(sess, getattr(conf, 'name')) # formerly request
+        return self._copySessionToForm(sess, conf.name, speak.name) # formerly request
 
     @endpoints.method(SESS_POST_REQUEST, SessionForm,
             path='session/{websafeConferenceKey}',
@@ -908,12 +920,14 @@ class ConferenceApi(remote.Service):
 
         Used when creating SessionForms with multiple sessions"""
         # use get_multi() where possible; NOT get() in a loop
+
+        # DEBUG fix when to call for keys and when not
         conf_keys = [s.key.parent() for s in sessions]
         conferences = ndb.get_multi(set(conf_keys))
         sess_cname = []
         for s in sessions:
             for c in conferences:
-                if s.conferenceKey == c.key.urlsafe():
+                if s.key.parent() == c.key: # fixed from s.conferenceKey
                     sess_cname.append((s, c.name))
         return sess_cname
 
