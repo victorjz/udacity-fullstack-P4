@@ -6,10 +6,15 @@ Prepared by Victor Zaragoza vjzara@gmail.com
 ## Corrections since last submission
 * `README.txt` is replaced with this file to make use of github markdown
 * Description in `cron.yaml` updated to reflect change in time period
+* Additional statement for Task 2.
+* The method for generating a key for `Speaker` now uses an allocated id instead of the speaker name.  Affected code revised throughout.  Statements in this file are also revised.
 * `Session` and `SessionForm` no longer contain a `conferenceKey`. Dependent code revised.
 * `Session` now contains a `KeyProperty` for a `Speaker` key and Speaker now contains a repeated `KeyProperty` for `Session` at which they will speak. This changes the methods `createSessionObject`, `_copySessionToForm`, and more.
 * Eliminated unnecessary lines from method `_cacheFeaturedSpeaker`
 * The endpoint method `getFeaturedSpeaker` is now defined
+* Repositioned put operation for better code flow in `_updateSessionWishlist`
+* Projection used for `getConferenceSessionTypes`
+* `_cacheFeaturedSpeaker` changed to accept just session web key instead of speaker and conference. Session contains both of these items.
 
 ## Project Notes and Setup
 These files contain course provided code that implements a fictional website called Conference Central. The purpose of the project is to write additional code that adds functionality as described here in [Project details][1]
@@ -23,15 +28,16 @@ Instructions for setting up the project via original source code are in `README.
 ## Written Responses
 ### Task 1
 #### Explain design choices for session and speaker implementation
-Following the pattern between Conference and ConferenceForm, Session and SessionForm were created.  It could be determined from examining Conference and ConferenceFrom that the former is extends Model and is necessary for storing data in the datastore, while ConferenceForm extends Messages and is necessary for passing information back to the frontend of the application. Likewise, then, were Session and SessionForm designed.
+Following the pattern between Conference and ConferenceForm, Session and SessionForm were created.  It could be determined from examining Conference and ConferenceFrom that the former extends Model and is necessary for storing data in the datastore, while ConferenceForm extends Messages and is necessary for passing information back to the frontend of the application. Likewise, then, were Session and SessionForm designed.
 
-###### NO NO NO NO
 
-The differences between Session and SessionForm follow conventions observed in the differences between Conference an ConferenceForm. For data that refers to anything other than a Session, then Session will strictly contain a websafekey referencing the other class, while sessionForm might contain the name of the other class object in addition to the websafekey. And so Session contains ConferenceKey while SessionForm contains ConferenceKey and conferenceName.  This mirrors the fact that Conference contains just organizerUserId while ConferenceForm contains that item plus organizerDisplayName.  The decision made for a session speaker is to make it its own entity rather than a property.  If kept as a string property, then the query in Task 1 to search for all session entries by speaker can be problematic if sessions were ever to reach a number in the thousands or more. There is a similar problem in Task 4 when determining if there are more than one session by the same speaker in the same conference.  Keeping a speaker as an entity and recording the sessions associated with that speaker means there are likely far fewer items to examine in a query.  Also, if speaker is ever further defined, for example to record professional affiliations, ratings, etc., then as its own entity such properties can be added later.
+The decision made for a session speaker is to make it its own entity rather than a property.  If kept as a string property, then the query in Task 1 to search for all session entries by speaker can be problematic if sessions were ever to reach a number in the thousands or more. There is a similar problem in Task 4 when determining if there are more than one session by the same speaker in the same conference.  Keeping a speaker as an entity and recording the sessions associated with that speaker means there are likely far fewer items to examine in a query.  Also, if speaker is ever further defined, for example to record professional affiliations, ratings, etc., then as its own entity such properties can be added later.
 
 
 ### Task 2
-All methods defined
+Decision made to allow a user to add sessions to their wishlist _without_ registering for the conference so that a user can save the sessions they are interested in for multiple conferences and commit to attend once they gauge their interest.
+
+All methods defined.
 
 ### Task 3
 ##### Make up two queries and define them

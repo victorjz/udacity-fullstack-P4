@@ -41,10 +41,9 @@ class SendConfirmationEmailHandler(webapp2.RequestHandler):
 class SetFeaturedSpeakerHandler(webapp2.RequestHandler):
     def post(self):
         """Set featured speaker announcement in Memcache"""
-        # passing Speaker and Conference web key
+        # passing Session web key
         ConferenceApi._cacheFeaturedSpeaker(
-            self.request.get('spkr_wkey'),
-            self.request.get('conf_wkey'))
+            self.request.get('sess_wkey'))
         self.response.set_status(204)
 
 # added path for handler needed for featured speaker

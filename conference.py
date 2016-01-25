@@ -577,15 +577,15 @@ class ConferenceApi(remote.Service):
 
 # - - - Sessions - - - - - - - - - - - - - - - - - - - -
     @staticmethod
-    def _cacheFeaturedSpeaker(spkr_wkey, conf_wkey):
+    def _cacheFeaturedSpeaker(sess_wkey):
         """Create announcement for featured speaker and assign to memcache
         Used by taskqueue
         request contains:
-            spkr_wkey: websafe key representing speaker for session just added
-            conf_wkey: websafe key represending conference for session just added
+            sess_wkey: websafe key representing session just added
         """
-        spkr = ndb.Key(urlsafe=spkr_wkey).get()
-        conf = ndb.Key(urlsafe=conf_wkey).get() # To later retrieve conference name
+        sess = ndb.Key(urlsafe=sess_wkey).get()
+        spkr = sess.speakerKey.get()
+        conf = sess.key.parent().get() # To later retrieve conference name
 
         # if there is more than one session at this conference by the same
         # speaker, add announcement to memcache
@@ -675,7 +675,6 @@ class ConferenceApi(remote.Service):
         # data['conferenceKey'] = request.conferenceKey = request.websafeConferenceKey
 
         # create or update speaker with session
-        sess_wk = sess_key.urlsafe()
         speak_q = Speaker.query()
         speak_q = speak_q.filter(Speaker.name==data['speakerName'])
         speak = speak_q.get()
@@ -705,7 +704,7 @@ class ConferenceApi(remote.Service):
         # TODO memcache entry as described above
         speak_wkey = speak.key.urlsafe()
         conf_wkey = request.websafeConferenceKey
-        taskqueue.add(params={'spkr_wkey':speak_wkey, 'conf_wkey':conf_wkey},
+        taskqueue.add(params={'sess_wkey':sess_key.urlsafe()},
             url='/tasks/set_featured_speaker')
 
         return self._copySessionToForm(sess, conf.name, speak.name) # formerly request
@@ -727,8 +726,13 @@ class ConferenceApi(remote.Service):
         conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
         confName = getattr(conf_key.get(), 'name')
         sessions = Session.query(ancestor=conf_key)
+        #spkr_keys = [s.speakerKey for s in sessions]
+        #speakers = ndb.get_multi(spkr_keys)
+        #spkr_names = {s.key.id(): s.name for s in speakers}
+        args = self._getArgsForSessionForm(sessions, confName)
+        #sess, confName, spkr_names[sess.speakerKey.id()]
         return SessionForms(
-            items=[self._copySessionToForm(sess, confName) for sess in sessions]
+            items=[self._copySessionToForm(*a) for a in args]
         )
 
     @endpoints.method(SESS_STRING_WSCK, SessionForms,
@@ -743,8 +747,10 @@ class ConferenceApi(remote.Service):
         sessions = Session.query(ancestor=conf_key)
         # filter for type of session
         sessions = sessions.filter(Session.typeOfSession==request.sessType)
+        # group sessions with their parent conference name and speaker name
+        args = self._getArgsForSessionForm(sessions, confName)
         return SessionForms(
-            items=[self._copySessionToForm(sess, confName) for sess in sessions]
+            items=[self._copySessionToForm(*a) for a in args]
         )
 
     @endpoints.method(endpoints.ResourceContainer(
@@ -753,15 +759,16 @@ class ConferenceApi(remote.Service):
     def getSessionsBySpeaker(self, request):
         "Return sessions across all conferences given a speaker name"
         # authorization isn't necessary
-        speak_key = ndb.Key(Speaker, getattr(request, 'speakerName'))
-        speak = speak_key.get()
-        sess_keys = [ndb.Key(urlsafe=wsk) for wsk in speak.sessionKeysToSpeak]
-        sessions = ndb.get_multi(sess_keys)
+        speak = Speaker.query()
+        speak = speak.filter(Speaker.name==request.speakerName)
+        # settle for first result in case of multiple speakers same name
+        speak = speak.get()
+        sessions = ndb.get_multi(speak.sessionKeysToSpeak)
 
-        # pair session with their parent conference name
-        sess_cname = self._getConfNamesForSessions(sessions)
+        # group sessions with their parent conference name and speaker name
+        args = self._getArgsForSessionForm(sessions, None, speak.name)
         return SessionForms(
-            items=[self._copySessionToForm(*scn) for scn in sess_cname]
+            items=[self._copySessionToForm(*a) for a in args]
         )
 
 # - - - - - - Session Wishlist - - - - - - - - - - - - - - -
@@ -792,6 +799,7 @@ class ConferenceApi(remote.Service):
             # add session to user profile
             prof.sessionKeysInWishlist.append(wssk)
             retval = True # session found and added
+            prof.put()
         # remove session from user wishlist
         else:
             # check if session is in wishlist
@@ -799,10 +807,11 @@ class ConferenceApi(remote.Service):
                 # remove the session from user wishlist
                 prof.sessionKeysInWishlist.remove(wssk)
                 retval = True # session found and removed
+                prof.put()
             else:
                 retval = False # session not in wishlist; not removed
+                # no change. do not put.
 
-        prof.put()
         return BooleanMessage(data=retval)
 
     @endpoints.method(SESS_GET_REQUEST, BooleanMessage,
@@ -833,11 +842,11 @@ class ConferenceApi(remote.Service):
         sess_keys = [ndb.Key(urlsafe=wssk) for wssk in prof.sessionKeysInWishlist]
         sessions = ndb.get_multi(sess_keys)
 
-        # pair sessions with their parent conference names
-        sess_cname = self._getConfNamesForSessions(sessions)
+        # group sessions with their parent conference name and speaker name
+        args = self._getArgsForSessionForm(sessions)
 
         return SessionForms(
-            items=[self._copySessionToForm(*scn) for scn in sess_cname])
+            items=[self._copySessionToForm(*a) for a in args])
 
 # - - - - - - - - - New Queries - - - - - - - - - - - - - - -
     @endpoints.method(endpoints.ResourceContainer(
@@ -857,9 +866,11 @@ class ConferenceApi(remote.Service):
         sessions = sessions.filter(Session.startTime >= tearliest)
         sessions = sessions.filter(Session.startTime <= tlatest)
 
-        cname = conf_key.get().name
+        confName = conf_key.get().name
+        # group sessions with their parent conference name and speaker name
+        args = self._getArgsForSessionForm(sessions, confName)
         return SessionForms(
-            items=[self._copySessionToForm(s, cname) for s in sessions]
+            items=[self._copySessionToForm(*a) for a in args]
         )
 
     @endpoints.method(CONF_GET_REQUEST, StringMessage,
@@ -869,7 +880,8 @@ class ConferenceApi(remote.Service):
         """Given a conference, returns a string listing all unique session
         types offered within the conference"""
         conf_key = ndb.Key(urlsafe=request.websafeConferenceKey)
-        sessions = Session.query(ancestor=conf_key)
+        sessions = Session.query(ancestor=conf_key
+            ).fetch(projection=[Session.typeOfSession])
         types_set = set()
         for s in sessions:
             types_set.add(s.typeOfSession)
@@ -898,9 +910,11 @@ class ConferenceApi(remote.Service):
             if s.startTime < tlatest_time:
                 sessions.append(s)
 
-        cname = conf_key.get().name
+        confName = conf_key.get().name
+        # group sessions with their parent conference name and speaker name
+        args = self._getArgsForSessionForm(sessions, confName)
         return SessionForms(
-            items = [self._copySessionToForm(s, cname) for s in sessions]
+            items = [self._copySessionToForm(*a) for a in args]
         )
 
 
@@ -914,23 +928,43 @@ class ConferenceApi(remote.Service):
         return time(**targs)
 
     @staticmethod
-    def _getConfNamesForSessions(sessions):
-        """Given a list of session, return session and parent
-        conference name pairs
+    def _getArgsForSessionForm(sessions, confName=None, speakName=None):
+        """Given a list of sessions, return a list of 3-tuples, representing
+        the arguments necessary for calling _copySessionToForm
 
-        Used when creating SessionForms with multiple sessions"""
-        # use get_multi() where possible; NOT get() in a loop
+        confName: Conference name. If given, the same conference name used
+            for every tuple. If blank, derived from sessions.
+        speakName: Speaker name. If given, the same speaker name used for every
+            tuple. If blank, derived from sessions."""
 
-        # DEBUG fix when to call for keys and when not
-        conf_keys = [s.key.parent() for s in sessions]
-        conferences = ndb.get_multi(set(conf_keys))
-        sess_cname = []
+        if not confName: # find conference name for every session
+            conf_keys = [s.key.parent() for s in sessions]
+            conferences = ndb.get_multi(conf_keys)
+            cnames = {c.key.id(): c.name for c in conferences}
+
+        if not speakName: # find speaker name for every session
+            spk_keys = [s.speakerKey for s in sessions]
+            speakers = ndb.get_multi(spk_keys)
+            spknames = {s.key.id(): s.name for s in speakers}
+
+        # make the list of tuples that will be passed to _copySessionToForm
+        # if confName provided, insert into every tuple. else use cnames
+        # if speakName provided, insert into every tuple. else use spknames
+        tuple_list = [] # tuples of elements named (s, cname, spkname)
         for s in sessions:
-            for c in conferences:
-                if s.key.parent() == c.key: # fixed from s.conferenceKey
-                    sess_cname.append((s, c.name))
-        return sess_cname
+            if confName:
+                cname = confName
+            else:
+                cname = cnames[s.key.parent().id()]
 
+            if speakName:
+                spkname = speakName
+            else:
+                spkname = spknames[s.speakerKey.id()]
+
+            tuple_list.append((s, cname, spkname))
+
+        return tuple_list
 
     @endpoints.method(endpoints.ResourceContainer(
         spkr_wkey=messages.StringField(1),
